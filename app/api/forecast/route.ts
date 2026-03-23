@@ -46,13 +46,39 @@ function getTideState(timestamp: Date, tideData: TideEvent[]): TideState {
   return { tideState, currentDirection, timeSinceLastTide };
 }
 
+function getWindLabel(direction: number): string {
+  // Zandvoort coast runs N-S. Wind FROM:
+  // SW (220-260): cross-offshore — ideal, wind blows away from shore at angle
+  // W (260-290): offshore — dangerous, blows straight out to sea
+  // NW (290-340): cross-shore from north — good, parallel to beach
+  // N (340-30): onshore from north — not ideal
+  // other: not kiteable
+  if (direction >= 220 && direction <= 260) return 'cross-offshore';
+  if (direction > 260 && direction <= 290) return 'offshore';
+  if (direction > 290 && direction <= 340) return 'cross-shore';
+  if (direction > 340 || direction <= 30) return 'onshore';
+  return 'not kiteable';
+}
+
+function getKiteSize(windSpeedKnots: number): string {
+  if (windSpeedKnots < 10) return 'too light';
+  if (windSpeedKnots < 14) return '17m+';
+  if (windSpeedKnots < 18) return '14-17m';
+  if (windSpeedKnots < 22) return '12-14m';
+  if (windSpeedKnots < 26) return '9-12m';
+  if (windSpeedKnots < 30) return '7-9m';
+  return 'too strong';
+}
+
 function calculateScore(
   windSpeedKnots: number,
   windDirection: number,
   tideState: string,
   currentDirection: string,
   timeSinceLastTide: number,
-  precipitation: number
+  precipitation: number,
+  windGustKnots: number,
+  waveHeight: number
 ): number {
   // Wind direction must be kiteable: 210-300 OR >=300 OR <=20
   const kiteable =
@@ -63,9 +89,20 @@ function calculateScore(
 
   // Wind speed score (0-40)
   let windSpeedScore = 0;
-  if (windSpeedKnots >= 19 && windSpeedKnots <= 25) windSpeedScore = 40;
-  else if (windSpeedKnots >= 15 && windSpeedKnots < 19) windSpeedScore = 20;
-  else if (windSpeedKnots > 25 && windSpeedKnots <= 28) windSpeedScore = 15;
+  if (windSpeedKnots >= 16 && windSpeedKnots <= 22) windSpeedScore = 40;
+  else if (windSpeedKnots >= 12 && windSpeedKnots < 16) windSpeedScore = 25;
+  else if (windSpeedKnots > 22 && windSpeedKnots <= 26) windSpeedScore = 20;
+  else if (windSpeedKnots > 26 && windSpeedKnots <= 30) windSpeedScore = 10;
+  else if (windSpeedKnots > 30) windSpeedScore = 0;
+
+  // Gust penalty: gusty = unpredictable
+  const gustPenalty = windGustKnots > windSpeedKnots * 1.4 ? 15 : 0;
+
+  // Wave height penalty
+  let wavePenalty = 0;
+  if (waveHeight >= 1.5) wavePenalty = 25;
+  else if (waveHeight >= 1.0) wavePenalty = 15;
+  else if (waveHeight >= 0.5) wavePenalty = 5;
 
   // Wind direction score (0-30)
   const goodDir =
@@ -95,7 +132,8 @@ function calculateScore(
   // Precipitation bonus
   const precipBonus = precipitation < 0.1 ? 10 : 0;
 
-  return Math.round(windSpeedScore + windDirScore + currentScore + precipBonus);
+  const total = windSpeedScore - gustPenalty - wavePenalty + windDirScore + currentScore + precipBonus;
+  return Math.round(Math.max(0, total));
 }
 
 function buildConditions(
@@ -143,7 +181,7 @@ export async function GET() {
 
     const [weatherRes, tideRes] = await Promise.all([
       fetch(
-        `https://api.stormglass.io/v2/weather/point?lat=${LAT}&lng=${LON}&params=windSpeed,windDirection,precipitation&source=noaa&start=${start.toISOString()}&end=${end.toISOString()}`,
+        `https://api.stormglass.io/v2/weather/point?lat=${LAT}&lng=${LON}&params=windSpeed,windDirection,windGust,waveHeight,precipitation&source=noaa&start=${start.toISOString()}&end=${end.toISOString()}`,
         {
           headers: { Authorization: STORMGLASS_API_KEY },
           next: { revalidate: 21600 },
@@ -171,7 +209,7 @@ export async function GET() {
     const tideEvents: TideEvent[] = tideData.data || [];
 
     // Index weather hours for quick lookup
-    const weatherByHour: Record<string, { windSpeed: number; windDirection: number; precipitation: number }> = {};
+    const weatherByHour: Record<string, { windSpeed: number; windDirection: number; windGust: number; waveHeight: number; precipitation: number }> = {};
     for (const hour of weatherData.hours || []) {
       const t = new Date(hour.time);
       const key = `${t.getUTCFullYear()}-${t.getUTCMonth()}-${t.getUTCDate()}-${t.getUTCHours()}`;
@@ -181,6 +219,8 @@ export async function GET() {
       weatherByHour[key] = {
         windSpeed: ws * 1.94384, // m/s to knots
         windDirection: wd,
+        windGust: (hour.windGust?.noaa ?? hour.windGust?.sg ?? 0) * 1.94384, // m/s to knots
+        waveHeight: hour.waveHeight?.noaa ?? hour.waveHeight?.sg ?? hour.waveHeight?.icon ?? 0, // meters
         precipitation: pr,
       };
     }
@@ -199,7 +239,7 @@ export async function GET() {
         const weather = weatherByHour[key];
         if (!weather) continue;
 
-        const { windSpeed, windDirection, precipitation } = weather;
+        const { windSpeed, windDirection, windGust, waveHeight, precipitation } = weather;
         const { tideState, currentDirection, timeSinceLastTide } = getTideState(ts, tideEvents);
 
         const currentStrength =
@@ -213,7 +253,9 @@ export async function GET() {
           tideState,
           currentDirection,
           timeSinceLastTide,
-          precipitation
+          precipitation,
+          windGust,
+          waveHeight
         );
 
         const conditions = buildConditions(
@@ -235,6 +277,11 @@ export async function GET() {
           time: timeStr,
           wind_speed: Math.round(windSpeed),
           wind_direction: Math.round(windDirection),
+          wind_gust: Math.round(windGust),
+          wave_height: Math.round(waveHeight * 10) / 10,
+          is_gusty: windGust > windSpeed * 1.4,
+          wind_label: getWindLabel(windDirection),
+          kite_size: getKiteSize(windSpeed),
           tide_state: tideState,
           current_direction: currentDirection,
           current_strength: currentStrength,
