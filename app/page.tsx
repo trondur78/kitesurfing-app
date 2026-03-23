@@ -46,7 +46,7 @@ function WindArrow({ direction }: { direction: number }) {
   // Arrow points in the direction wind is coming FROM, so rotate 180deg offset
   return (
     <span
-      style={{ display: 'inline-block', transform: `rotate(${direction}deg)`, fontSize: '1rem', lineHeight: 1 }}
+      style={{ display: 'inline-block', transform: `rotate(${direction + 180}deg)`, fontSize: '1rem', lineHeight: 1 }}
       title={`${direction}°`}
     >
       ↑
