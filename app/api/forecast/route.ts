@@ -196,6 +196,12 @@ export async function GET() {
       ),
     ]);
 
+    if (weatherRes.status === 402 || weatherRes.status === 429) {
+      return NextResponse.json(
+        { error: 'quota_exceeded', message: 'Daily forecast limit reached. Data resets at midnight UTC — check back after 01:00 Amsterdam time.' },
+        { status: 503 }
+      );
+    }
     if (!weatherRes.ok) {
       throw new Error(`Stormglass weather error: ${weatherRes.status}`);
     }

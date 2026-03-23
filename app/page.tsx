@@ -164,8 +164,15 @@ export default function Home() {
     setError(null);
     try {
       const response = await fetch('/api/forecast');
-      if (!response.ok) throw new Error('Failed to fetch forecast');
       const data = await response.json();
+      if (!response.ok) {
+        if (data?.error === 'quota_exceeded') {
+          setError('quota');
+        } else {
+          setError('Could not load forecast data');
+        }
+        return;
+      }
       setForecasts(data);
       setUpdatedAt(new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
     } catch (err) {
@@ -217,7 +224,14 @@ export default function Home() {
           </>
         )}
 
-        {error && (
+        {error === 'quota' && (
+          <div className="bg-gray-800 border border-gray-600 rounded-xl p-5 text-center">
+            <p className="text-4xl mb-3">🪁</p>
+            <p className="text-white font-semibold mb-1">Forecast unavailable right now</p>
+            <p className="text-gray-400 text-sm">Daily data limit reached. Forecast resets at midnight UTC — check back after 01:00 Amsterdam time.</p>
+          </div>
+        )}
+        {error && error !== 'quota' && (
           <div className="bg-red-900/40 border border-red-700 rounded-xl p-4 text-center">
             <p className="text-red-300 mb-3">{error}</p>
             <button
