@@ -71,7 +71,7 @@ function calculateScore(
   const windDirScore = goodDir ? 30 : 15;
 
   // Current score (0-15): against-wind current creates chop, with-wind is clean
-  const angle = currentDir - windDir;
+  const angle = currentDir - windDirection;
   const component = currentSpeedKn * Math.cos((angle * Math.PI) / 180);
   let currentScore = 10; // neutral
   if (component > 0.5) currentScore = 0;  // against wind — chop
