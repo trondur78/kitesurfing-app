@@ -89,10 +89,10 @@ function WindLabelBadge({ label }: { label: string }) {
   return <span className={`${color} text-xs`}>{label}{label === 'offshore' ? ' ⚠️' : ''}</span>;
 }
 
-function TideIcon({ state }: { state: string }) {
-  if (state === 'rising') return <span title="Rising tide" className="text-blue-300">↑</span>;
-  if (state === 'falling') return <span title="Falling tide" className="text-blue-300">↓</span>;
-  return <span className="text-gray-500">~</span>;
+function CurrentIcon({ strength }: { strength: number }) {
+  if (strength > 1.0) return <span title={`${strength} kn current`} className="text-blue-300">≋</span>;
+  if (strength > 0.3) return <span title={`${strength} kn current`} className="text-blue-500">≈</span>;
+  return <span className="text-gray-600">~</span>;
 }
 
 function SkeletonCard() {
@@ -279,9 +279,9 @@ export default function Home() {
                         <WindLabelBadge label={slot.wind_label} />
                       </div>
 
-                      {/* Tide */}
+                      {/* Current */}
                       <span className="text-sm w-4 shrink-0">
-                        <TideIcon state={slot.tide_state} />
+                        <CurrentIcon strength={slot.current_strength} />
                       </span>
 
                       {/* Indicators */}
@@ -315,8 +315,7 @@ export default function Home() {
                           <span>Gusts: {slot.wind_gust} kn{slot.is_gusty ? ' ⚠️' : ''}</span>
                           <span>Kite size: {slot.kite_size}</span>
                           <span>Waves: {slot.wave_height}m{slot.wave_height >= 1.0 ? ' ⚠️' : ''}</span>
-                          <span>Tide: {slot.tide_state}</span>
-                          <span>Current: {slot.current_direction} ({slot.current_strength}%)</span>
+                          <span>Current: {slot.current_strength} kn @ {slot.current_direction}</span>
                           {slot.precipitation >= 0.1 && <span>Rain: {slot.precipitation} mm/h</span>}
                         </div>
                       </div>
