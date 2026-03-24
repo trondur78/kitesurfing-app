@@ -1,332 +1,347 @@
-'use client';
+'use client'
 
-import { useEffect, useState } from 'react';
+import { useState, useEffect, useCallback } from 'react'
 
 interface Forecast {
-  date: string;
-  time: string;
-  wind_speed: number;
-  wind_direction: number;
-  wind_gust: number;
-  wave_height: number;
-  is_gusty: boolean;
-  wind_label: string;
-  kite_size: string;
-  tide_state: string;
-  current_direction: string;
-  current_strength: number;
-  precipitation: number;
-  score: number;
-  conditions: string;
+  date: string
+  time: string
+  windSpeed: number
+  windGust: number
+  windDir: number
+  isGusty: boolean
+  windLabel: string
+  kiteSize: string
+  waveHeight: number
+  currentSpeed: number
+  currentComponent: number
+  precipitation: number
+  score: number
 }
 
 interface DayGroup {
-  date: string;
-  label: string;
-  slots: Forecast[];
-  bestScore: number;
-  bestWindow: string | null;
+  date: string
+  dayName: string
+  shortDate: string
+  slots: Forecast[]
+  bestScore: number
 }
 
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + 'T12:00:00');
-  return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+function getDayName(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00')
+  const today = new Date()
+  const tomorrow = new Date()
+  tomorrow.setDate(today.getDate() + 1)
+  if (d.toDateString() === today.toDateString()) return 'Today'
+  if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow'
+  return d.toLocaleDateString('en-GB', { weekday: 'long' })
 }
 
-function getBestWindow(slots: Forecast[]): string | null {
-  const good = slots.filter(s => s.score >= 60);
-  if (good.length === 0) return null;
-  if (good.length === 1) return good[0].time;
-  // Find longest consecutive run
-  let bestRun: Forecast[] = [];
-  let currentRun: Forecast[] = [good[0]];
-  for (let i = 1; i < good.length; i++) {
-    const prevIdx = slots.indexOf(good[i - 1]);
-    const currIdx = slots.indexOf(good[i]);
-    if (currIdx === prevIdx + 1) {
-      currentRun.push(good[i]);
-    } else {
-      if (currentRun.length > bestRun.length) bestRun = currentRun;
-      currentRun = [good[i]];
-    }
-  }
-  if (currentRun.length > bestRun.length) bestRun = currentRun;
-  if (bestRun.length === 1) return bestRun[0].time;
-  return `${bestRun[0].time}–${bestRun[bestRun.length - 1].time}`;
+function getShortDate(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00')
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
-function ScoreBadge({ score }: { score: number }) {
-  let bg = 'bg-gray-700';
-  let text = 'text-gray-400';
-  if (score >= 80) { bg = 'bg-green-600'; text = 'text-white'; }
-  else if (score >= 60) { bg = 'bg-yellow-500'; text = 'text-gray-900'; }
-  else if (score >= 40) { bg = 'bg-orange-500'; text = 'text-white'; }
-  else if (score > 0) { bg = 'bg-red-700'; text = 'text-white'; }
-  return (
-    <span className={`${bg} ${text} text-xs font-bold px-2 py-1 rounded-full min-w-[38px] text-center inline-block`}>
-      {score === 0 ? '—' : score}
-    </span>
-  );
+function ScoreBadge({ score, large }: { score: number; large?: boolean }) {
+  const base = large
+    ? 'px-3 py-1 text-sm font-bold rounded-full'
+    : 'px-2 py-0.5 text-xs font-semibold rounded-full min-w-[32px] text-center'
+  if (score === 0) return <span className={`${base} bg-slate-600 text-slate-300`}>–</span>
+  if (score >= 80) return <span className={`${base} bg-green-600 text-white`}>{score}</span>
+  if (score >= 60) return <span className={`${base} bg-yellow-500 text-black`}>{score}</span>
+  if (score >= 40) return <span className={`${base} bg-orange-500 text-white`}>{score}</span>
+  return <span className={`${base} bg-red-600 text-white`}>{score}</span>
 }
 
-function WindArrow({ direction }: { direction: number }) {
+function WindArrow({ dir }: { dir: number }) {
+  const displayDir = (dir + 180) % 360
   return (
     <span
-      style={{ display: 'inline-block', transform: `rotate(${direction + 180}deg)`, fontSize: '0.9rem', lineHeight: 1 }}
-      title={`${direction}°`}
+      className="inline-block text-blue-400"
+      style={{ transform: `rotate(${displayDir}deg)` }}
+      title={`Wind from ${dir}°`}
     >
       ↑
     </span>
-  );
+  )
 }
 
 function WindLabelBadge({ label }: { label: string }) {
-  let color = 'text-gray-500';
-  if (label === 'cross-offshore') color = 'text-green-400';
-  else if (label === 'offshore') color = 'text-red-400';
-  else if (label === 'cross-shore') color = 'text-yellow-400';
-  else if (label === 'onshore') color = 'text-orange-400';
-  return <span className={`${color} text-xs`}>{label}{label === 'offshore' ? ' ⚠️' : ''}</span>;
-}
-
-function CurrentIcon({ strength }: { strength: number }) {
-  if (strength > 1.0) return <span title={`${strength} kn current`} className="text-blue-300">≋</span>;
-  if (strength > 0.3) return <span title={`${strength} kn current`} className="text-blue-500">≈</span>;
-  return <span className="text-gray-600">~</span>;
-}
-
-function SkeletonCard() {
+  const styles: Record<string, string> = {
+    'cross-offshore': 'bg-green-800 text-green-200',
+    offshore: 'bg-red-800 text-red-200',
+    'cross-shore': 'bg-yellow-800 text-yellow-200',
+    onshore: 'bg-orange-800 text-orange-200',
+    'not kiteable': 'bg-slate-700 text-slate-400',
+  }
+  const cls = styles[label] ?? 'bg-slate-700 text-slate-400'
   return (
-    <div className="bg-gray-800 rounded-xl p-4 border border-gray-700 animate-pulse">
-      <div className="h-5 bg-gray-700 rounded w-1/3 mb-3" />
-      {[1, 2, 3, 4].map(i => (
-        <div key={i} className="h-10 bg-gray-700 rounded mb-2" />
-      ))}
-    </div>
-  );
+    <span className={`px-1.5 py-0.5 text-xs rounded whitespace-nowrap ${cls}`}>
+      {label === 'offshore' && '⚠️ '}
+      {label}
+    </span>
+  )
 }
 
-function BeginnerGuide() {
-  const [open, setOpen] = useState(true);
+function BeginnerGuide({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   return (
-    <div className="bg-teal-900/40 border border-teal-700 rounded-xl overflow-hidden">
+    <div className="mb-4 rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
       <button
-        onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-4 py-3 text-left"
+        onClick={onToggle}
       >
-        <span className="text-teal-300 font-semibold text-sm">What do the scores mean?</span>
-        <span className="text-teal-500 text-xs">{open ? '▲ hide' : '▼ show'}</span>
+        <span className="font-semibold text-slate-200">📚 Beginner Guide</span>
+        <span className="text-slate-400 text-sm">{open ? '▲' : '▼'}</span>
       </button>
       {open && (
-        <div className="px-4 pb-4 space-y-3 text-sm">
-          <div className="space-y-1">
-            <p className="text-gray-300 font-medium mb-1">Score guide</p>
-            <div className="flex items-center gap-2"><span className="bg-green-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">80+</span><span className="text-gray-300">Perfect — ideal conditions for beginners</span></div>
-            <div className="flex items-center gap-2"><span className="bg-yellow-500 text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full">60–79</span><span className="text-gray-300">Good — enjoyable with minor compromises</span></div>
-            <div className="flex items-center gap-2"><span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">40–59</span><span className="text-gray-300">OK — manageable but not ideal</span></div>
-            <div className="flex items-center gap-2"><span className="bg-red-700 text-white text-xs font-bold px-2 py-0.5 rounded-full">1–39</span><span className="text-gray-300">Poor — not recommended for beginners</span></div>
-            <div className="flex items-center gap-2"><span className="bg-gray-700 text-gray-400 text-xs font-bold px-2 py-0.5 rounded-full">—</span><span className="text-gray-300">Not kiteable — wrong wind direction</span></div>
-          </div>
-
+        <div className="px-4 pb-4 text-sm text-slate-300 space-y-3">
           <div>
-            <p className="text-gray-300 font-medium mb-1">Perfect beginner session</p>
-            <ul className="text-gray-400 space-y-0.5 list-disc list-inside">
-              <li>Wind 16–22 knots, steady (no gusts)</li>
-              <li>SW direction — cross-offshore is safest</li>
-              <li>Wave height under 0.5m — flat water</li>
-              <li>Dry weather</li>
-            </ul>
+            <p className="font-semibold text-white mb-1">Score legend</p>
+            <div className="flex flex-wrap gap-2">
+              <span className="px-2 py-0.5 rounded-full bg-green-600 text-white text-xs font-bold">80+ Great</span>
+              <span className="px-2 py-0.5 rounded-full bg-yellow-500 text-black text-xs font-bold">60–79 Good</span>
+              <span className="px-2 py-0.5 rounded-full bg-orange-500 text-white text-xs font-bold">40–59 Fair</span>
+              <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-xs font-bold">1–39 Poor</span>
+              <span className="px-2 py-0.5 rounded-full bg-slate-600 text-slate-300 text-xs font-bold">– Not kiteable</span>
+            </div>
           </div>
-
-          <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2">
-            <p className="text-red-300 text-xs font-medium">Safety: offshore wind ⚠️</p>
-            <p className="text-gray-400 text-xs mt-0.5">If the wind label says "offshore", the wind blows straight out to sea. If you fall or lose your kite, you drift away from shore. Beginners should avoid offshore days entirely.</p>
+          <div>
+            <p className="font-semibold text-white mb-1">Perfect session</p>
+            <p>16–22 knots, cross-offshore (SW) wind, flat water under 0.5m, no rain.</p>
+          </div>
+          <div className="bg-red-900/50 border border-red-700 rounded-lg p-3">
+            <p className="font-semibold text-red-300 mb-1">⚠️ Offshore wind danger</p>
+            <p className="text-red-200 text-xs">
+              Offshore wind blows you away from shore. If your gear fails you cannot return. Beginners
+              should NEVER kite in offshore conditions without experienced supervision.
+            </p>
           </div>
         </div>
       )}
     </div>
-  );
+  )
+}
+
+function SkeletonCard() {
+  return (
+    <div className="rounded-xl bg-slate-800 border border-slate-700 p-4 animate-pulse">
+      <div className="h-5 bg-slate-700 rounded w-1/2 mb-3" />
+      {[1, 2, 3, 4].map(i => (
+        <div key={i} className="h-10 bg-slate-700 rounded mb-2" />
+      ))}
+    </div>
+  )
+}
+
+function SlotRow({
+  slot,
+  isExpanded,
+  onToggle,
+}: {
+  slot: Forecast
+  isExpanded: boolean
+  onToggle: () => void
+}) {
+  const currentLabel =
+    slot.currentComponent > 0.5
+      ? 'against wind – expect chop'
+      : slot.currentComponent < -0.5
+        ? 'with wind – clean water'
+        : 'slack'
+
+  const conditionsSummary = (): string => {
+    if (slot.score === 0) return 'Not kiteable at this time.'
+    const parts: string[] = []
+    if (slot.score >= 80) parts.push('Excellent conditions')
+    else if (slot.score >= 60) parts.push('Good conditions')
+    else if (slot.score >= 40) parts.push('Fair conditions')
+    else parts.push('Poor conditions')
+    if (slot.isGusty) parts.push('gusty winds')
+    if (slot.waveHeight >= 1.5) parts.push('large waves')
+    else if (slot.waveHeight >= 1.0) parts.push('moderate waves')
+    if (slot.precipitation >= 0.1) parts.push('rain expected')
+    return parts.join(', ') + '.'
+  }
+
+  return (
+    <div className="border-t border-slate-700 first:border-t-0">
+      <button
+        className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-slate-700/50 active:bg-slate-700 transition-colors"
+        onClick={onToggle}
+      >
+        <span className="text-sm font-mono text-slate-400 w-12 shrink-0">{slot.time}</span>
+        <WindArrow dir={slot.windDir} />
+        <span className="text-sm font-semibold text-white shrink-0">
+          {slot.isGusty ? `${slot.windSpeed}/${slot.windGust} kn` : `${slot.windSpeed} kn`}
+        </span>
+        <WindLabelBadge label={slot.windLabel} />
+        <span className="flex gap-0.5 text-sm">
+          {slot.precipitation >= 0.1 && <span title={`${slot.precipitation} mm/h`}>💧</span>}
+          {slot.waveHeight >= 1.0 && <span title={`${slot.waveHeight}m waves`}>🌊</span>}
+        </span>
+        <span className="ml-auto">
+          <ScoreBadge score={slot.score} />
+        </span>
+        <span className="text-slate-500 text-xs">{isExpanded ? '▲' : '▼'}</span>
+      </button>
+
+      {isExpanded && (
+        <div className="px-4 pb-3 pt-1 bg-slate-700/30 space-y-2 text-sm">
+          <div className="text-xl font-bold text-white">🪁 {slot.kiteSize}</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-300">
+            <div>
+              <span className="text-slate-400 text-xs block">Waves</span>
+              <span className="font-medium">{slot.waveHeight}m</span>
+            </div>
+            <div>
+              <span className="text-slate-400 text-xs block">Wind dir</span>
+              <span className="font-medium">{slot.windDir}°</span>
+            </div>
+            <div>
+              <span className="text-slate-400 text-xs block">Current</span>
+              <span className="font-medium">{slot.currentSpeed} kn</span>
+            </div>
+            <div>
+              <span className="text-slate-400 text-xs block">Rain</span>
+              <span className="font-medium">{slot.precipitation} mm/h</span>
+            </div>
+          </div>
+          <div className="text-xs bg-slate-800 rounded px-2 py-1 text-slate-400">
+            Current: {currentLabel}
+          </div>
+          <div className="text-xs text-slate-400 italic">{conditionsSummary()}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DayCard({ day }: { day: DayGroup }) {
+  const [expandedTime, setExpandedTime] = useState<string | null>(null)
+  const toggle = (time: string) => setExpandedTime(prev => (prev === time ? null : time))
+
+  return (
+    <div className="rounded-xl bg-slate-800 border border-slate-700 overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 bg-slate-750">
+        <div>
+          <span className="font-bold text-white">{day.dayName}</span>
+          <span className="text-slate-400 text-sm ml-2">{day.shortDate}</span>
+        </div>
+        <ScoreBadge score={day.bestScore} large />
+      </div>
+      {day.slots.map(slot => (
+        <SlotRow
+          key={slot.time}
+          slot={slot}
+          isExpanded={expandedTime === slot.time}
+          onToggle={() => toggle(slot.time)}
+        />
+      ))}
+    </div>
+  )
 }
 
 export default function Home() {
-  const [forecasts, setForecasts] = useState<Forecast[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [data, setData] = useState<Forecast[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
+  const [guideOpen, setGuideOpen] = useState(true)
+
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/forecast')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const json = await res.json()
+      if (json.error) throw new Error(json.error)
+      setData(json)
+      setLastUpdated(
+        new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unknown error')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    fetchForecast();
-  }, []);
+    fetchData()
+  }, [fetchData])
 
-  const fetchForecast = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch('/api/forecast');
-      const data = await response.json();
-      if (!response.ok) {
-        if (data?.error === 'quota_exceeded') {
-          setError('quota');
-        } else {
-          setError('Could not load forecast data');
-        }
-        return;
-      }
-      setForecasts(data);
-      setUpdatedAt(new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
-    } catch (err) {
-      setError('Could not load forecast data');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Group by day
-  const days: DayGroup[] = [];
-  for (const f of forecasts) {
-    let day = days.find(d => d.date === f.date);
-    if (!day) {
-      day = { date: f.date, label: formatDate(f.date), slots: [], bestScore: 0, bestWindow: null };
-      days.push(day);
-    }
-    day.slots.push(f);
-    if (f.score > day.bestScore) day.bestScore = f.score;
-  }
-  for (const day of days) {
-    day.bestWindow = getBestWindow(day.slots);
-  }
-
-  const toggleSlot = (key: string) => {
-    setExpanded(prev => prev === key ? null : key);
-  };
+  const days: DayGroup[] = data
+    ? Object.values(
+        data.reduce(
+          (acc, slot) => {
+            if (!acc[slot.date]) {
+              acc[slot.date] = {
+                date: slot.date,
+                dayName: getDayName(slot.date),
+                shortDate: getShortDate(slot.date),
+                slots: [],
+                bestScore: 0,
+              }
+            }
+            acc[slot.date].slots.push(slot)
+            acc[slot.date].bestScore = Math.max(acc[slot.date].bestScore, slot.score)
+            return acc
+          },
+          {} as Record<string, DayGroup>,
+        ),
+      )
+    : []
 
   return (
-    <main className="min-h-screen bg-gray-900 pb-8">
+    <main className="max-w-lg mx-auto px-4 py-6">
       {/* Header */}
-      <div className="bg-gray-800 border-b border-gray-700 px-4 py-4 mb-4 sticky top-0 z-10">
-        <h1 className="text-xl font-bold text-white tracking-tight">Langevelderslag</h1>
-        <p className="text-gray-400 text-sm">
-          Kite Forecast
-          {updatedAt && <span className="ml-2 text-gray-500">· Updated {updatedAt}</span>}
-        </p>
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Langevelderslag</h1>
+          <p className="text-slate-400 text-sm">Kite Forecast</p>
+          {lastUpdated && (
+            <p className="text-slate-500 text-xs mt-0.5">Updated {lastUpdated}</p>
+          )}
+        </div>
+        <button
+          onClick={fetchData}
+          disabled={loading}
+          className="mt-1 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-sm font-medium transition-colors"
+        >
+          {loading ? '…' : '↻ Refresh'}
+        </button>
       </div>
 
-      <div className="px-4 space-y-4 max-w-lg mx-auto">
-        {/* Beginner guide */}
-        {!loading && !error && <BeginnerGuide />}
+      <BeginnerGuide open={guideOpen} onToggle={() => setGuideOpen(o => !o)} />
 
-        {loading && (
-          <>
-            <SkeletonCard />
-            <SkeletonCard />
-          </>
-        )}
+      {error && (
+        <div className="rounded-xl bg-red-900/50 border border-red-700 p-4 mb-4 text-center">
+          <p className="text-red-300 font-medium mb-1">Failed to load forecast</p>
+          <p className="text-red-400 text-sm mb-3">{error}</p>
+          <button
+            onClick={fetchData}
+            className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-sm font-medium"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
-        {error === 'quota' && (
-          <div className="bg-gray-800 border border-gray-600 rounded-xl p-5 text-center">
-            <p className="text-4xl mb-3">🪁</p>
-            <p className="text-white font-semibold mb-1">Forecast unavailable right now</p>
-            <p className="text-gray-400 text-sm">Daily data limit reached. Forecast resets at midnight UTC — check back after 01:00 Amsterdam time.</p>
-          </div>
-        )}
-        {error && error !== 'quota' && (
-          <div className="bg-red-900/40 border border-red-700 rounded-xl p-4 text-center">
-            <p className="text-red-300 mb-3">{error}</p>
-            <button
-              onClick={fetchForecast}
-              className="bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-            >
-              Retry
-            </button>
-          </div>
-        )}
+      {loading && (
+        <div className="space-y-3">
+          {[1, 2, 3].map(i => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
+      )}
 
-        {!loading && !error && days.map(day => (
-          <div key={day.date} className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-            {/* Day header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-              <div>
-                <span className="text-white font-semibold">{day.label}</span>
-                {day.bestWindow && day.bestScore >= 60 && (
-                  <span className="ml-2 text-gray-400 text-xs">{day.bestWindow}</span>
-                )}
-              </div>
-              <ScoreBadge score={day.bestScore} />
-            </div>
-
-            {/* Time slots */}
-            <div className="divide-y divide-gray-700">
-              {day.slots.map(slot => {
-                const key = `${slot.date}-${slot.time}`;
-                const isExpanded = expanded === key;
-                return (
-                  <div key={key}>
-                    <button
-                      onClick={() => toggleSlot(key)}
-                      className="w-full text-left px-4 py-3 flex items-center gap-2 active:bg-gray-700 transition-colors"
-                    >
-                      {/* Time */}
-                      <span className="text-gray-400 text-sm w-11 shrink-0">{slot.time}</span>
-
-                      {/* Wind speed + arrow */}
-                      <div className="w-20 shrink-0">
-                        <div className="text-white text-sm font-medium">
-                          <WindArrow direction={slot.wind_direction} />
-                          {' '}{slot.wind_speed} kn
-                        </div>
-                        <WindLabelBadge label={slot.wind_label} />
-                      </div>
-
-                      {/* Current */}
-                      <span className="text-sm w-4 shrink-0">
-                        <CurrentIcon strength={slot.current_strength} />
-                      </span>
-
-                      {/* Indicators */}
-                      <div className="flex items-center gap-1 shrink-0">
-                        {slot.is_gusty && (
-                          <span className="text-xs bg-orange-900/60 text-orange-300 px-1.5 py-0.5 rounded">💨</span>
-                        )}
-                        {slot.precipitation >= 0.1 && (
-                          <span className="text-xs text-blue-400" title={`${slot.precipitation}mm`}>💧</span>
-                        )}
-                        {slot.wave_height >= 1.0 && (
-                          <span className="text-xs text-yellow-400" title={`${slot.wave_height}m waves`}>🌊</span>
-                        )}
-                      </div>
-
-                      <span className="flex-1" />
-
-                      {/* Score */}
-                      <ScoreBadge score={slot.score} />
-
-                      {/* Expand chevron */}
-                      <span className="text-gray-500 text-xs ml-1">{isExpanded ? '▲' : '▼'}</span>
-                    </button>
-
-                    {/* Expanded detail */}
-                    {isExpanded && (
-                      <div className="px-4 pb-3 pt-2 border-t border-gray-700 bg-gray-850">
-                        <p className="text-gray-300 text-sm mb-3">{slot.conditions}</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-400">
-                          <span>Wind: {slot.wind_speed} kn ({slot.wind_direction}°)</span>
-                          <span>Gusts: {slot.wind_gust} kn{slot.is_gusty ? ' ⚠️' : ''}</span>
-                          <span>Kite size: {slot.kite_size}</span>
-                          <span>Waves: {slot.wave_height}m{slot.wave_height >= 1.0 ? ' ⚠️' : ''}</span>
-                          <span>Current: {slot.current_strength} kn @ {slot.current_direction}</span>
-                          {slot.precipitation >= 0.1 && <span>Rain: {slot.precipitation} mm/h</span>}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
+      {!loading && !error && (
+        <div className="space-y-3">
+          {days.map(day => (
+            <DayCard key={day.date} day={day} />
+          ))}
+        </div>
+      )}
     </main>
-  );
+  )
 }
