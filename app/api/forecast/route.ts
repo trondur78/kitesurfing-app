@@ -9,18 +9,20 @@ const MARINE_URL =
 const SLOT_HOURS = [9, 12, 15, 18]
 
 function isKiteable(dir: number): boolean {
-  return (dir >= 210 && dir <= 300) || dir >= 300 || dir <= 20
+  // Beach faces 290° (straight onshore). Kiteable window: 206° (S cross-shore) to 20° (N cross-shore) via 290°.
+  return dir >= 206 || dir <= 20
 }
 
 function isIdealDir(dir: number): boolean {
-  return (dir >= 220 && dir <= 250) || dir >= 340 || dir <= 10
+  // Ideal: cross-offshore SW sector (206°–255°) and far NW-N sector (340°–20°)
+  return (dir >= 206 && dir <= 255) || dir >= 340 || dir <= 10
 }
 
 function getWindLabel(dir: number): string {
-  if (dir >= 220 && dir <= 260) return 'cross-offshore'
-  if (dir >= 261 && dir <= 290) return 'offshore'
-  if (dir >= 291 && dir <= 340) return 'cross-shore'
-  if (dir >= 341 || dir <= 30) return 'onshore'
+  // Beach faces 290° = straight onshore. 206° = S cross-shore boundary. 20° = N cross-shore boundary.
+  if (dir >= 206 && dir <= 255) return 'cross-offshore'  // SW: partially offshore component
+  if (dir >= 256 && dir <= 324) return 'onshore'         // W zone centred on 290°
+  if (dir >= 325 || dir <= 20) return 'cross-shore'      // NW–N sector
   return 'not kiteable'
 }
 
