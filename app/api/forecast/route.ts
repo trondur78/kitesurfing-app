@@ -9,20 +9,22 @@ const MARINE_URL =
 const SLOT_HOURS = [9, 12, 15, 18]
 
 function isKiteable(dir: number): boolean {
-  // Beach faces 290° (straight onshore). Kiteable window: 206° (S cross-shore) to 20° (N cross-shore) via 290°.
-  return dir >= 206 || dir <= 20
+  // Beach faces 290° (straight onshore). Kiteable window: 206°–320° and 320°–20° (via north).
+  // Zones: 206–215 cross-offshore | 215–265 cross-shore (S) | 265–320 onshore | 320–20 cross-shore (N)
+  return (dir >= 206 && dir <= 320) || dir >= 320 || dir <= 20
 }
 
 function isIdealDir(dir: number): boolean {
-  // Ideal: cross-offshore SW sector (206°–255°) and far NW-N sector (340°–20°)
-  return (dir >= 206 && dir <= 255) || dir >= 340 || dir <= 10
+  // Best: cross-offshore (206°–215°) and cross-shore N (320°–20°)
+  return (dir >= 206 && dir <= 215) || dir >= 320 || dir <= 20
 }
 
 function getWindLabel(dir: number): string {
-  // Beach faces 290° = straight onshore. 206° = S cross-shore boundary. 20° = N cross-shore boundary.
-  if (dir >= 206 && dir <= 255) return 'cross-offshore'  // SW: partially offshore component
-  if (dir >= 256 && dir <= 324) return 'onshore'         // W zone centred on 290°
-  if (dir >= 325 || dir <= 20) return 'cross-shore'      // NW–N sector
+  // Beach faces 290°. Zones per Trondur 2026-03-25.
+  if (dir >= 206 && dir <= 215) return 'cross-offshore'   // best: SW, partially offshore
+  if (dir >= 215 && dir <= 265) return 'cross-shore'      // S cross-shore
+  if (dir >= 265 && dir <= 320) return 'onshore'          // centred on 290°
+  if (dir >= 320 || dir <= 20)  return 'cross-shore'      // NW–N cross-shore
   return 'not kiteable'
 }
 

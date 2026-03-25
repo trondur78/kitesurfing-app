@@ -106,7 +106,7 @@ function BeginnerGuide({ open, onToggle }: { open: boolean; onToggle: () => void
           </div>
           <div>
             <p className="font-semibold text-white mb-1">Perfect session</p>
-            <p>16–22 knots, cross-offshore wind (206°–255°, SW sector), flat water under 0.5m, no rain.</p>
+            <p>16–22 knots, cross-offshore (206°–215°) or cross-shore (215°–265° / 320°–20°) wind, flat water under 0.5m, no rain.</p>
           </div>
           <div className="bg-red-900/50 border border-red-700 rounded-lg p-3">
             <p className="font-semibold text-red-300 mb-1">⚠️ Offshore wind danger</p>
